@@ -23,6 +23,7 @@
 //     -p <ppm>          Frequency correction ppm (default -3)
 //     -I                Implicit header mode
 //     -L <pay_len>      Payload length for implicit header (default 11)
+//     -o <auto|on|off>  Low-data-rate optimization (default auto)
 //     -A                Auto-scan: run all SF (7-12) and BW combinations in parallel
 //     -r <file>         Read IQ from file (rtl_sdr u8 format, "-" = stdin) instead of SDR;
 //                       .C16 files are read as PortaPack int16 IQ, with tuner freq and
@@ -275,6 +276,7 @@ struct LoRaConfig {
     uint16_t preamble_len   = 8;
     bool     soft_decoding  = true;
     int      deep_level     = 0;    // -X: offline deep parameter search (0=off, 1-3)
+    int      ldro_override  = -1;   // -1=auto, 0=off, 1=on
 
     // derived
     uint32_t n_bins;
@@ -288,6 +290,11 @@ struct LoRaConfig {
         samples_per_symbol = n_bins * os_factor;
         sync_words[0] = ((sync_word & 0xF0) >> 4) << 3;
         sync_words[1] = (sync_word & 0x0F) << 3;
+    }
+
+    bool use_ldro() const {
+        if (ldro_override >= 0) return ldro_override != 0;
+        return ((float)(1u << sf) * 1e3f / bw) > LDRO_MAX_DURATION_MS;
     }
 };
 
@@ -1017,7 +1024,7 @@ private:
             }
 
             // Determine LDRO
-            m_ldro = ((float)(1u << cfg.sf) * 1e3f / cfg.bw) > LDRO_MAX_DURATION_MS;
+            m_ldro = cfg.use_ldro();
 
             // Calculate total payload symbols
             int sf_minus_2ldro = cfg.sf - 2 * m_ldro;
@@ -1033,7 +1040,7 @@ private:
 
         } else if (is_header && cfg.impl_head) {
             // Implicit header - parameters from config
-            m_ldro = ((float)(1u << cfg.sf) * 1e3f / cfg.bw) > LDRO_MAX_DURATION_MS;
+            m_ldro = cfg.use_ldro();
             int sf_minus_2ldro = cfg.sf - 2 * m_ldro;
             total_payload_symbols = 8 + (int)ceil((double)(2 * m_pay_len - cfg.sf + 2 + (m_pay_has_crc ? 4 : 0)) / sf_minus_2ldro) * (4 + m_pay_cr);
             m_received_head = true;
@@ -1489,7 +1496,7 @@ private:
                     // retimed hypothesis against - the 5-bit header checksum
                     // alone would accept garbage. Only pursue CRC'd frames.
                     if (!pcrc) return false;
-                    ldro = ((float)(1u << cfg.sf) * 1e3f / cfg.bw) > LDRO_MAX_DURATION_MS;
+                    ldro = cfg.use_ldro();
                     int sf2 = cfg.sf - 2 * (ldro ? 1 : 0);
                     total_syms = 8 + (int)ceil((double)(2 * plen - cfg.sf + 2 + 5 + (pcrc ? 4 : 0)) / sf2) * (4 + pcr);
                     hdr = false;
@@ -2332,7 +2339,7 @@ int main(int argc, char *argv[]) {
     size_t max_decoders = 0;   // 0 = auto (see -W handling)
     int opt;
 
-    while ((opt = getopt(argc, argv, "f:s:b:S:c:w:g:GTp:IL:r:D:AC:W:M:X:d:H:")) != -1) {
+    while ((opt = getopt(argc, argv, "f:s:b:S:c:w:g:GTp:Io:L:r:D:AC:W:M:X:d:H:")) != -1) {
         switch (opt) {
         case 'f': cfg.freq = (uint32_t)atol(optarg); freq_given = true; break;
         case 's': cfg.samp_rate = (uint32_t)atol(optarg); samp_given = true; break;
@@ -2345,6 +2352,15 @@ int main(int argc, char *argv[]) {
         case 'T': cfg.tuner_agc = true; break;
         case 'p': cfg.ppm = atoi(optarg); break;
         case 'I': cfg.impl_head = true; break;
+        case 'o':
+            if (strcmp(optarg, "auto") == 0) cfg.ldro_override = -1;
+            else if (strcmp(optarg, "off") == 0 || strcmp(optarg, "0") == 0) cfg.ldro_override = 0;
+            else if (strcmp(optarg, "on") == 0 || strcmp(optarg, "1") == 0) cfg.ldro_override = 1;
+            else {
+                fprintf(stderr, "-o: LDRO must be auto, on, or off\n");
+                return 1;
+            }
+            break;
         case 'L': cfg.pay_len = (uint32_t)atoi(optarg); break;
         case 'r': iq_file = optarg; break;
         case 'D': dump_file = optarg; break;
@@ -2368,7 +2384,7 @@ int main(int argc, char *argv[]) {
         }
         default:
             fprintf(stderr, "Usage: %s [-f tuner_freq] [-s samp_rate] [-b bw[,bw..]] [-S sf[,sf..]] [-c cr]\n"
-                            "          [-w sync_word_hex] [-g gain] [-G] [-p ppm] [-I] [-L pay_len] [-A]\n"
+                            "          [-w sync_word_hex] [-g gain] [-G] [-p ppm] [-I] [-L pay_len] [-o auto|on|off] [-A]\n"
                             "          [-C chan_freq[,chan_freq..]] [-r iq_file] [-D dump_file] [-d dev]\n"
                             "  -d selects the RTL-SDR: an index, or a case-insensitive substring of\n"
                             "     the device's \"manufacturer product serial\" USB strings (default 0)\n"
@@ -2377,6 +2393,7 @@ int main(int argc, char *argv[]) {
                             "     min samp_rate 2 MS/s (auto-raised), -p folded into the tune freq\n"
                             "  -G enables the RTL2832 internal digital AGC\n"
                             "  -T enables the R820T analog tuner AGC (overrides -g)\n"
+                            "  -o overrides low-data-rate optimization (default auto)\n"
                             "  -W f_lo,f_hi[,dwell_s] sweeps the band in retuned chunks, running the full\n"
                             "     channel x SF x BW demod fan-out on each (survey scan; default\n"
                             "     dwell 30 s, BW 125k, SF 7-12; override with -b/-S/-s/-g/...)\n"

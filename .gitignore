@@ -1,4 +1,6 @@
 *.o
 lora_rx
 lora_tx_gen
+lora_tx
 *.iq
+__pycache__/

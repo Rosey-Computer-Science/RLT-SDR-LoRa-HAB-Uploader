@@ -1,5 +1,186 @@
 # LoraReceiverStandalone
 
+## Install and run on macOS
+
+These steps build the receiver, connect an RTL-SDR, decode the balloon's LoRa
+packets and optionally send position telemetry to SondeHub Amateur.
+
+### 1. Open Terminal
+
+Open **Terminal** from **Applications → Utilities**. Commands in the following
+steps should be pasted into Terminal one at a time.
+
+### 2. Install Apple's command-line tools
+
+```bash
+xcode-select --install
+```
+
+A window will open. Choose **Install**, wait for it to finish, then return to
+Terminal. If the tools are already installed, macOS will say so and you can
+continue.
+
+### 3. Install Homebrew and the RTL-SDR driver
+
+First check whether Homebrew is installed:
+
+```bash
+brew --version
+```
+
+If that prints `command not found`, install Homebrew using the command shown at
+[brew.sh](https://brew.sh/), then close and reopen Terminal. Install the RTL-SDR
+driver:
+
+```bash
+brew install librtlsdr python
+```
+
+### 4. Download and build the receiver
+
+```bash
+git clone https://github.com/Rosey-Computer-Science/RLT-SDR-LoRa-HAB-Uploader.git
+cd RLT-SDR-LoRa-HAB-Uploader
+make
+```
+
+The final command creates the `lora_rx` program. You only need to repeat `make`
+after updating the source code.
+
+### 5. Enter the balloon settings
+
+Open the supplied configuration file in TextEdit:
+
+```bash
+open -e config.ini
+```
+
+In the `[lora]` section, set `mode`, `frequency_mhz` and `sync_word` to the
+values used by the balloon. `mode` selects the standard UKHAS/Pi In The Sky
+LoRa preset, so the spreading factor, bandwidth, coding rate, header type and
+low-data-rate optimization are set together:
+
+| Mode | Typical use | Header | Bandwidth | Coding | SF | LDRO |
+|---:|---|---|---:|---:|---:|---|
+| 0 | Telemetry | Explicit | 20.8 kHz | 4/8 | 11 | On |
+| 1 | SSDV | Implicit | 20.8 kHz | 4/5 | 6 | Off |
+| 2 | Repeater | Explicit | 62.5 kHz | 4/8 | 8 | Off |
+| 3 | Fast SSDV | Explicit | 250 kHz | 4/6 | 7 | Off |
+| 4 | Very fast test mode | Implicit | 250 kHz | 4/5 | 6 | Off |
+| 5 | Calling mode | Explicit | 41.7 kHz | 4/8 | 11 | Off |
+
+Modes 1 and 4 normally use a fixed 255-byte SSDV payload. Their length can be
+changed with `implicit_payload_length` if the transmitter uses a different
+fixed length. These presets follow the
+[UKHAS LoRa tracking mode definitions](https://ukhas.org.uk/doku.php?id=guides:lora_tracking_guide).
+
+The decoder expects comma-separated text telemetry. In `[telemetry]`, list the
+columns in exactly the order transmitted by the balloon. These six names are
+required:
+
+```ini
+fields = callsign, frame, time, lat, lon, alt
+```
+
+For a sentence such as
+`$$ROSEY-1,42,12:34:56,46.5191,6.5668,1234,9,-12.5,4.10`, use:
+
+```ini
+fields = callsign, frame, time, lat, lon, alt, sats, temp, batt
+```
+
+`time` must be UTC and may be `HH:MM:SS` or a complete ISO-8601 date and time.
+Optional supported names include `sats`, `temp`, `humidity`, `batt`, `speed`,
+`vel_h`, `vel_v`, `heading` and `pressure`.
+
+Save the file and quit TextEdit.
+
+### 6. Connect the radio and start decoding
+
+Connect the RTL-SDR and antenna, then run:
+
+```bash
+python3 decode-lora.py
+```
+
+Decoded text will appear with the local reception time. Only packets that pass
+the LoRa packet CRC are displayed or offered for upload. Press **Control-C** to
+stop safely.
+
+### 7. Open the local tracking dashboard
+
+While the decoder is running, open this address in a web browser:
+
+```text
+http://localhost:8080
+```
+
+The dashboard shows the latest packet, every value labelled using the
+`[telemetry] fields` list, recent packet history, current altitude and SNR. Any
+packet containing valid `lat` and `lon` values is added to the map and to the
+flight trail. The map tiles require an internet connection, but received
+packets and decoded fields continue updating without one.
+
+The default `[web]` settings in `config.ini` make the page accessible only on
+the same Mac and retain the latest 500 packets in memory. Set `enabled = false`
+to turn the dashboard off. Changing `host` to `0.0.0.0` makes it accessible to
+other devices on the same network; only do this on a network you trust.
+
+The dashboard shows the receiver's current tuned frequency. Enter a new value
+between 24 and 1766 MHz and press **Tune** to restart the receiver on that
+frequency. This is a runtime setting; edit `frequency_mhz` in `config.ini` if
+you want the new frequency to remain in use after restarting the program.
+
+To confirm the receiver settings without starting the radio:
+
+```bash
+python3 decode-lora.py --show-command
+```
+
+### 8. Enable SondeHub Amateur uploads
+
+First confirm that decoding works and that latitude, longitude and altitude are
+in the expected columns. Then edit `config.ini` again and change the
+`[sondehub]` section:
+
+```ini
+enabled = true
+uploader_callsign = YOUR_NAME_OR_CALLSIGN
+dev_mode = false
+```
+
+`enabled = false` is the safe default. When `dev_mode = true`, packets are sent
+to the API for validation but are marked as test data and are not stored. If you
+enter all three station position values, the receiver's fixed position is also
+published on SondeHub's listener map; leave all three blank if you do not want
+to publish it.
+
+Uploads happen in the background. A connection or API error is printed, but it
+does not stop the radio or decoding. Flight positions can be viewed on the
+[SondeHub Amateur tracker](https://amateur.sondehub.org/).
+
+### Updating later
+
+From the project directory:
+
+```bash
+git pull
+make
+```
+
+Your `config.ini` contains station-specific settings, so check it after an
+update before starting the receiver.
+
+### If the RTL-SDR is not detected
+
+- Unplug it, reconnect it directly to the Mac, and try again.
+- Close any other radio program that may be using the dongle.
+- Run `system_profiler SPUSBDataType` and check that the device appears in the
+  USB list.
+- Run `brew reinstall librtlsdr`, then run `make clean` followed by `make`.
+
+## About this project
+
 Standalone LoRa packet receiver in pure C/C++. No GNU Radio dependency.
 
 Connects directly to an RTL-SDR dongle or a HackRF (or replays a recorded IQ file) and implements the full LoRa PHY demodulation chain:
@@ -19,6 +200,7 @@ Based on the DSP algorithms from [gr-lora_sdr](https://github.com/tapparelj/gr-l
 
 - `librtlsdr` — RTL-SDR driver library
 - A C++17 compiler (g++ or clang++)
+- Python 3.9 or newer (for `decode-lora.py` and SondeHub uploads)
 - [KissFFT](https://github.com/mborgerding/kissfft) (included in source)
 
 ### Linux (Debian/Ubuntu)
@@ -30,7 +212,7 @@ sudo apt install librtlsdr-dev build-essential
 ### macOS
 
 ```bash
-brew install librtlsdr
+brew install librtlsdr python
 ```
 
 Xcode command line tools provide the compiler (`xcode-select --install` if needed). The Makefile auto-detects macOS and adds the correct Homebrew paths for both Apple Silicon and Intel Macs.
@@ -63,6 +245,7 @@ make check      # builds the offline frame generator and runs end-to-end tests (
 | `-p <ppm>` | Frequency correction | -3 |
 | `-I` | Implicit header mode | off |
 | `-L <bytes>` | Payload length (implicit mode) | 11 |
+| `-o <auto\|on\|off>` | Low-data-rate optimization; the Python launcher sets this from the selected UKHAS mode | auto |
 | `-A` | Auto-scan: run all SF (7-12) x BW decoders in parallel | off |
 | `-W <lo>,<hi>[,<dwell>]` | Survey sweep: retune through the band in overlapping chunks (central 75% of the sample rate), running the full channel x SF x BW demod fan-out on each for `dwell` seconds (default 30), cycling forever. Two stages per chunk: a **coarse** pass on a raster of the smallest BW detects frames, then each detection's CFO gives the transmitter's true centre and a **refine** pass decodes there (real networks are rarely on a raster - MeshCore SK at 869.618 MHz is 29 bins off the 62.5 kHz grid). The tuner parks off-grid so no channel lands on the DC spike. Defaults: SF 7-12 and BW 125k; **add `-A` to scan BW 62.5k/125k/250k/500k too** (a network on a bandwidth you did not list is simply invisible, which looks exactly like an empty band). The plan - SF set, BW set, decoders per chunk, batches and estimated cycle time - is printed before scanning starts. `DETECT`/`HIT`/`REFINED HIT` summaries on stderr; normal `rx cfg`/`rx ok` stdout. | — |
 | `-X <1-3>` | **Offline deep parameter search** (needs `-r`): when a frame fails CRC after the normal recovery ladder, re-decode the whole retained frame over a grid of CFO / sub-chip timing / SFO hypotheses, accepting on CRC. The live estimates come from ~4 preamble symbols at whatever SNR the frame arrived with; the payload's 50-200 symbols say far more about the true values. Level 1 is fast and narrow, 3 is exhaustive (past ±1 CFO bin, ±1 chip of timing, 5 SFO scalings). Most hypotheses die after 8 symbols on the re-parsed header, so it costs ~3x a plain replay. | off |

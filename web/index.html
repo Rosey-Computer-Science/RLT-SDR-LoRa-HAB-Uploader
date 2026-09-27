@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LoRa balloon tracker</title>
+    <link rel="preconnect" href="https://tile.openstreetmap.org">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">Ground station</p>
+        <h1>LoRa balloon tracker</h1>
+      </div>
+      <div id="connection" class="connection waiting" role="status" aria-live="polite"><span></span>Waiting for packets</div>
+    </header>
+
+    <main>
+      <section class="summary" aria-label="Receiver and latest telemetry summary">
+        <article class="frequency-card">
+          <form id="frequency-form">
+            <label for="frequency-input">Tuned frequency</label>
+            <div class="frequency-control">
+              <input id="frequency-input" name="frequency_mhz" type="number" min="24" max="1766" step="0.001" required aria-describedby="frequency-status">
+              <span>MHz</span>
+              <button type="submit">Tune</button>
+            </div>
+            <small id="frequency-status" aria-live="polite">Loading receiver setting…</small>
+          </form>
+        </article>
+        <article><span>Packets received</span><strong id="packet-count">0</strong></article>
+        <article><span>Payload</span><strong id="payload-name">—</strong></article>
+        <article><span>Altitude</span><strong id="altitude">—</strong></article>
+        <article><span>Last update</span><strong id="last-update">—</strong></article>
+      </section>
+
+      <section class="map-card">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Flight path</p>
+            <h2>Position trail</h2>
+          </div>
+          <button id="fit-trail" type="button">Fit trail</button>
+        </div>
+        <div id="map" aria-label="Map of decoded balloon positions"></div>
+        <p id="map-message" class="map-message">The trail will appear after a packet contains valid lat and lon fields.</p>
+      </section>
+
+      <section class="details-card">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Most recent packet</p>
+            <h2>Decoded fields</h2>
+          </div>
+          <span id="latest-snr" class="snr">SNR —</span>
+        </div>
+        <dl id="decoded-fields" class="decoded-fields">
+          <div><dt>Status</dt><dd>Waiting for the first decoded packet</dd></div>
+        </dl>
+        <div class="raw-packet">
+          <span>Raw packet</span>
+          <code id="raw-packet">—</code>
+        </div>
+      </section>
+
+      <section class="history-card">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Reception log</p>
+            <h2>Recent packets</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Received</th><th>Payload</th><th>Frame</th><th>Position</th><th>Altitude</th><th>SNR</th></tr>
+            </thead>
+            <tbody id="packet-history">
+              <tr class="empty-row"><td colspan="6">No packets received yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer>Positions remain on this computer and are cleared when the decoder stops.</footer>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
